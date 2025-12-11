@@ -8,7 +8,8 @@ Created on Thu Aug 14 11:12:55 2025
 import matplotlib.pyplot as plt
 import numpy as np
     
-def violinPlots(y1, y2, color1, color2, pointID, my_title, my_ylabel, yLimits, paired):
+def violinPlots(y1, y2, color1, color2, pointID, my_title, my_ylabel, yLimits, paired,
+                my_yticks = None):
 
  
     fig, ax = plt.subplots(figsize=(10, 8))
@@ -108,5 +109,15 @@ def violinPlots(y1, y2, color1, color2, pointID, my_title, my_ylabel, yLimits, p
     ax.set_title(my_title)
     # axs[i].set_xlabel("Prey vs IR laser")
     ax.set_ylabel(my_ylabel)
-    ax.set_xlim(0, 3)
+    ax.set_xlim(0.5, 2.5)
     ax.set_ylim(yLimits[0], yLimits[1])  
+    plt.xticks([1,2]),
+    plt.yticks(my_yticks[0], my_yticks[1])
+    # plt.yticks([0, 5, 10, 15, 20])
+    # Hide the top and right spines
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+
+    # Set tick parameters to remove right and top ticks
+    plt.gca().tick_params(axis='x', which='both', direction='out', bottom=True, top=False)
+    plt.gca().tick_params(axis='y', which='both', direction='out', left=True, right=False)

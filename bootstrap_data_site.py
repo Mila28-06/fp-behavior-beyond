@@ -9,106 +9,197 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 from perm_test_array import perm_test_array
-from bootstrap_data import bootstrap_data
+# from bootstrap_data import bootstrap_data
+from bootstrap_data_bias_corrected import bootstrap_data
 from consec_idx import consec_idx
 
+
+nt = False
+initiate_aligned = True
+perm_testing = True # if u wanna test difference between two signals
+# site_specific = 'ZI-L' 
+trial_type = ['approach', 'IR'] #choose one or more trial type here ('approach', 'avoid', 'NR' )
+combine_hemispheres = False
+
 # Load combined data
-tankfolder = r'\\vs03.herseninstituut.knaw.nl\VS03-CSF-1\Conrad\Innate_approach\Data_analysis\24.35.01\\'
+if nt == True:
+    tankfolder = r'\\vs03.herseninstituut.knaw.nl\VS03-CSF-1\Conrad\Innate_approach\Data_analysis\24.35.01\\'
+else: 
+    tankfolder = r'\\vs03.herseninstituut.knaw.nl\VS03-CSF-1\Conrad\Innate_approach\Data_analysis\24.35.01\\freelymoving\\'
 
 with open(f'{tankfolder}allDatComb.pkl', 'rb') as f:
     d = pickle.load(f)
 
-# trialData = d['trialData_trialOnset']  # Extract site-specific data
-trialData = d['trialData']  # for movement aligned data
+if initiate_aligned == True:
+    trialData = d['trialData']  # for movement aligned data
+else: 
+    trialData = d['trialData_trialOnset']  # for prey laser onset data, rmember to change title ;)
+ 
 
 
 thres = 5  # Consecutive threshold length
 pre = 5
 post = 25
 
-# Colors for plotting
-gree = [0.47, 0.67, 0.19]
-gris = [0.65, 0.65, 0.65]
-red = [0.78, 0, 0]
+# PLOTTING SPEED
+# plt.figure()
+# plt.plot(np.nanmean(d['ITIspeed'], axis = 0), color=[0.6, 0.6, 0.6])
+# plt.fill_between(range(0,d['ITIspeed'].shape[1]),
+#                 ( np.nanmean(d['ITIspeed'], axis = 0) + np.nanstd(d['ITIspeed'], axis=0) / np.sqrt(len(d['ITIspeed']))),
+#                  (np.nanmean(d['ITIspeed'], axis = 0) - np.nanstd(d['ITIspeed'], axis=0) / np.sqrt(len(d['ITIspeed']))),
+#                  color=[0.6, 0.6, 0.6], alpha=0.3)
+     
+# plt.plot(np.nanmean(d['speedTrialsMov'], axis=0), color=[0.78, 0, 0])
+# plt.fill_between(range(0,d['speedTrialsMov'].shape[1]),
+#                 ( np.nanmean(d['speedTrialsMov'], axis = 0) + np.nanstd(d['speedTrialsMov'], axis=0) / np.sqrt(len(d['speedTrialsMov']))),
+#                  (np.nanmean(d['speedTrialsMov'], axis = 0) - np.nanstd(d['speedTrialsMov'], axis=0) / np.sqrt(len(d['speedTrialsMov']))),
+#                  color=[0.78, 0, 0], alpha=0.3)
+# ymin, ymax = plt.ylim()
+# plt.vlines(150, ymin=ymin, ymax=ymax, linestyle='--', color='black')
+# ax = plt.gca()
+# ax.set_xlim([50, 600])
+# plt.xlabel('Frames')
+# plt.ylabel('NT speed, mm/s')
 
-# this blocked out code is for plotting single trial data
-# siggy = trialData['SC to ZI-R']['approach']
-# plt.figure(figsize=(12, 6))
 
-# for i in range(siggy.shape[0]):
-#     plt.plot(siggy[i], label=f'Row {i}')
 
-# plt.xlabel('Index')
-# plt.ylabel('Value')
-# plt.title('Line Plot of Each Row in 12x900 Array')
-# plt.tight_layout()
-# plt.show()
+
+# tmp = np.where(perm_VR<0.05)[0]
+# id = tmp[consec_idx(tmp, thres)]
+# plt.plot(ts[id], 2 * np.ones((len(ts[id]), 2))-0.5, 's', markersize=7, markerfacecolor= [0.65, 0.65, 0.65], color=[0.65, 0.65, 0.65])
+
+data_list = [trialData]
+
+if combine_hemispheres:
+    combined_list = [{}, {}]
+    data_list = [trialData, d['ITI']]
+    
+    for x, data_set in enumerate(data_list):
+        for key in data_set.keys():
+            # Only process "-L" entries to avoid duplicates
+            if key.endswith('-L'):
+                base = key[:-2]  # e.g. "PAG" from "PAG-L"
+                left = data_set.get(f"{base}-L")
+                right = data_set.get(f"{base}-R")
+        
+                if left is not None and right is not None:
+                    combined_list[x][f"{base}-both"] = {
+                        k: np.concatenate([left[k], right[k]]) for k in left.keys()
+                    }
+                else:
+                    # Handle missing side gracefully
+                    combined_list[x][f"{base}-both"] = left or right
+                    
+        data_list[x] = combined_list[x]
+        
+    d['ITI'] = data_list[1]
+
+trialData = data_list[0]
+
 
 for site, data in trialData.items():
+    
+    # if site != 'PAG-L' or site != 'PAG-R':
+    #     continue
    
-    #choose trial type here ('approach', 'avoid', 'NR' )
-    if len(data['approach']) > 0:
-        signal = data['approach'][~np.isnan(data['approach']).any(axis=1)]
-        
-    print(f"Total trials for {site}: {len(data['approach'])}")
-    
-
-    print(f"Processing site: {site}")
-
-    # Bootstrapping
-    print('bootstrapping ...')
-    btsrp_app = bootstrap_data(signal, 5000, 0.0001)
-    
-    # print('bootstrapping avoid...')
-    # btsrp_avoid = bootstrap_data(avoidSignal, 5000, 0.0001)
-
-    ts = np.linspace(-pre, post, signal.shape[1])
-
-    # Plot approach signal
     plt.figure()
-    plt.plot(ts, np.mean(signal, axis=0), color=gris, label='NR')
-    plt.fill_between(ts,
-                     np.mean(signal, axis=0) + np.std(signal, axis=0) / np.sqrt(len(signal)),
-                     np.mean(signal, axis=0) - np.std(signal, axis=0) / np.sqrt(len(signal)),
-                     color=gris, alpha=0.3)
-
-    # Plot avoid signal
-    # plt.plot(ts, np.mean(avoidSignal, axis=0), color=gris, label='Avoid')
-    # plt.fill_between(ts,
-    #                  np.mean(avoidSignal, axis=0) + np.std(avoidSignal, axis=0) / np.sqrt(len(avoidSignal)),
-    #                  np.mean(avoidSignal, axis=0) - np.std(avoidSignal, axis=0) / np.sqrt(len(avoidSignal)),
-    #                  color=gris, alpha=0.3)
-
-    # Bootstrap significance
-    ymax = np.max(np.mean(signal, axis=0) + np.std(signal, axis=0) / np.sqrt(len(signal)))
-    
-    tmp = np.where(btsrp_app[1, :] < 0)[0]
-    if len(tmp) > 1:
-        id = tmp[consec_idx(tmp, thres)]
-        plt.plot(ts[id], ymax * np.ones((len(ts[id]), 2)) + 1, 's', 
-                 markersize=7, markerfacecolor=gris, color=gris)
         
-    tmp = np.where(btsrp_app[0, :] > 0)[0]
-    if len(tmp) > 1:
-        id = tmp[consec_idx(tmp, thres)]
-        plt.plot(ts[id], ymax * np.ones((len(ts[id]), 2)) + 1, 's', 
-                 markersize=7, markerfacecolor=gris, color=gris)
-        
+# if site == site_specific:
+    if 'ITI' not in trial_type and 'IR' not in trial_type:
+        if len(trial_type) > 1:
+            plot_data = list(range(len(trial_type)))
+            for i, signal in enumerate(trial_type):
+                plot_data[i] = data[trial_type[i]][~np.isnan(data[trial_type[i]]).any(axis=1)]
+                print(f"Total {trial_type[i]} trials for {site}: {len(data[trial_type[i]])}")
+        else:
+            if len(data[trial_type[0]]) > 0:
+                plot_data = [data[trial_type[0]][~np.isnan(data[trial_type[0]]).any(axis=1)]]
+                print(f"Total trials for {site}: {len(data[trial_type[0]])}")
+            
+    if 'ITI' in trial_type or 'IR' in trial_type:
+        if len(trial_type) > 1:
+            if len(data[trial_type[0]]) > 0:
+                signal = data[trial_type[0]][~np.isnan(data[trial_type[0]]).any(axis=1)]
+                print(f"Total trials for {site}: {len(data[trial_type[0]])}")
+                
+                if 'ITI' in trial_type:
+                    signal_ITI = d['ITI'][site]['ITI']
+                    print(f"Total ITI traces for {site}: {len(signal_ITI)}")
+                    plot_data = [signal, signal_ITI]
+                else:
+                    signal_IR = data[trial_type[1]][~np.isnan(data[trial_type[1]]).any(axis=1)]
+                    print(f"Total IR traces for {site}: {len(signal_IR)}")
+                    plot_data = [signal, signal_IR]
+                
+                
+        else:
+            plot_data = [d['ITI'][site]['ITI']]
+            print(f"Total ITI traces for {site}: {len(plot_data[0])}")
 
-    # tmp = np.where(btsrp_avoid[1, :] < 0)[0]
-    # if len(tmp) > 1:
-    #     id = tmp[consec_idx(tmp, thres)]
-    #     plt.plot(ts[id], np.max(np.mean(avoidSignal, axis=1)) * np.ones((len(ts[id]), 2)) + 1, 's', 
-    #              markersize=7, markerfacecolor=gris, color=gris)
     
-    # tmp = np.where(btsrp_avoid[0, :] > 0)[0]
-    # if len(tmp) > 1:
-    #     id = tmp[consec_idx(tmp, thres)]
-    #     plt.plot(ts[id], np.max(np.mean(avoidSignal, axis=1)) * np.ones((len(ts[id]), 2)) + 1, 's', 
-    #              markersize=7, markerfacecolor=gris, color=gris)
+    
+    # finding values to plot bCI and perm test data later...
+    
+    if len(plot_data) > 1:
+        
+        ymax_total = np.max([np.mean(plot_data[0], axis = 0), np.mean(plot_data[1], axis = 0)]) + 1
+    else:
+        ymax_total = np.max([np.mean(plot_data[0], axis = 0)]) + 1 + 2
 
-    # plt.box(False)
-    # Add vertical dashed line at x = 150
+    
+    for index, signal in enumerate(plot_data):
+        
+    
+        # Bootstrapping
+        print('bootstrapping ...')
+        btsrp_app = bootstrap_data(signal, 10000, 0.0001)
+        
+        # Colors for plotting
+        if trial_type[index] == 'approach':
+            plt_color = [0.47, 0.67, 0.19] #green
+        elif trial_type[index] == 'NR':
+            plt_color = [0.65, 0.65, 0.65] #grey
+        elif trial_type[index] == 'ITI' or trial_type[index] == 'IR':
+            plt_color = [0.416, 0.741, 0.741] #blue
+        else:
+            plt_color = [0.78, 0, 0] # red, avoid
+          
+        ts = np.linspace(-pre, post, signal.shape[1])
+    
+        # Plot signal
+        plt.plot(ts, np.mean(signal, axis=0), color=plt_color, label=trial_type[index])
+        plt.fill_between(ts,
+                         np.mean(signal, axis=0) + np.std(signal, axis=0) / np.sqrt(len(signal)),
+                         np.mean(signal, axis=0) - np.std(signal, axis=0) / np.sqrt(len(signal)),
+                         color=plt_color, alpha=0.3)
+    
+        ymax = ymax_total - index/2
+        
+        
+        # Bootstrap significance
+        tmp = np.where(btsrp_app[1, :] < 0)[0]
+        if len(tmp) > 1:
+            id = tmp[consec_idx(tmp, thres)]
+            plt.plot(ts[id], ymax * np.ones((len(ts[id]), 2)) + 1, 's', 
+                     markersize=7, markerfacecolor=plt_color, color=plt_color)
+            
+        tmp = np.where(btsrp_app[0, :] > 0)[0]
+        if len(tmp) > 1:
+            id = tmp[consec_idx(tmp, thres)]
+            plt.plot(ts[id], ymax * np.ones((len(ts[id]), 2)) + 1, 's', 
+                     markersize=7, markerfacecolor=plt_color, color=plt_color)
+            
+    
+        
+    if perm_testing:
+        print('Permuting ...')
+        ymax = ymax +0.5
+        # perm_test, _ = perm_test_array(trialData[site][trial_type[0]], d['ITI'][site][trial_type[1]], 1000)
+        perm_test, _ = perm_test_array(trialData[site][trial_type[0]], trialData[site][trial_type[1]], 1000)
+        perm_hits = np.where(perm_test<0.05)[0] # find significant points in permutation test
+        perm_x = perm_hits[consec_idx(perm_hits, thres)] # consecutive thersholding
+        plt.plot(ts[perm_x], ymax * np.ones((len(ts[perm_x]), 2)), 's', markersize=7, markerfacecolor=  [0.659, 0.427, 0.91], color= [0.659, 0.427, 0.91])
+        
     plt.axvline(x=0, linestyle='--', color='black', linewidth=1.5)
     plt.axhline(y=0, linestyle='--', color='black', linewidth=1.5)
     
@@ -119,9 +210,15 @@ for site, data in trialData.items():
     # Set tick parameters to remove right and top ticks
     plt.gca().tick_params(axis='x', which='both', direction='out', bottom=True, top=False)
     plt.gca().tick_params(axis='y', which='both', direction='out', left=True, right=False)
-    plt.title(f'Site: {site} - Approach trials')
+    plt.title(f'Site: {site} - {trial_type} trials')
     plt.ylabel('Z-Score')
-    plt.xlabel('Prey laser onset (s)')
-    # plt.xlabel('Movement initiation (s)')
-    plt.legend()
+    if initiate_aligned == True and 'NR' not in trial_type:
+        plt.xlabel('Movement onset (s)')
+    elif initiate_aligned == True and 'NR' in trial_type:
+        plt.xlabel('Shuffled movement onset (s)')
+    else:
+        plt.xlabel('Prey Laser onset (s)')
+    # plt.legend()
+    # plt.savefig(f'{tankfolder}{site}_{trial_type}.png', transparent = True)
     plt.show()
+

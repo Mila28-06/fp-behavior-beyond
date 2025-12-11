@@ -6,8 +6,8 @@ Created on Mon Aug 11 10:46:38 2025
 """
 fps = 30
 
-t1 = '01.05'
-t2 = '24.22'
+t1 = '21.04'
+t2 = '28.00'
 
 # split into seconds and frames
 t1s, t1f = map(int, t1.split('.'))

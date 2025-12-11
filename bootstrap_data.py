@@ -36,7 +36,7 @@ def bootstrap_data(data, num_boots, sig):
 
         # Calculate bootstrap confidence intervals
         data_boots = np.sort(data_boots, axis=0)
-        lower_conf_index = int(np.ceil(num_boots * (sig / 2))) + 1
+        lower_conf_index = int(np.ceil(num_boots * (sig / 2))) + 1 #change to minus 1?
         upper_conf_index = int(np.floor(num_boots * (1 - sig / 2)))
 
         bootsCI[0, :] = data_boots[lower_conf_index, :]
