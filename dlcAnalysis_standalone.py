@@ -21,8 +21,7 @@ import pandas as pd
 import scipy.io
 import glob
 import matplotlib.pyplot as plt
-# from scipy.interpolate import interp1d
-# from scipy.interpolate import CubicSpline
+import pickle
 from scipy.interpolate import PchipInterpolator as pchip
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Circle
@@ -91,9 +90,16 @@ def nt_change_camera_to_arena_coordinates(camera_x,camera_y,params):
     
     return arena_x, arena_y
 
-def nt_change_overhead_to_arena_coordinates(overhead_x,overhead_y,params):
+def nt_change_overhead_to_arena_coordinates(overhead_x,overhead_y,params, centered_desired):
     camera_x, camera_y = nt_change_overhead_to_camera_coordinates(overhead_x,overhead_y,params)
     arena_x,arena_y = nt_change_camera_to_arena_coordinates(camera_x,camera_y,params)
+    
+    if not centered_desired:
+       # Map back to original video coordinate system
+       arena_x = arena_x + params['overhead_camera_width'] / 2 \
+                           - params['overhead_camera_image_offset'][0]
+       arena_y = arena_y + params['overhead_camera_height'] / 2 \
+                           - params['overhead_camera_image_offset'][1]
     return arena_x, arena_y
 
 def timestamp_to_frame(ts):
@@ -152,13 +158,7 @@ def my_trajectory(data, title):
     plt.ylabel("Y position")
     plt.axis("equal")  # keep aspect ratio    boxoff()
     boxoff()
-    plt.show()
-
-# def trial_index_finder(ttt_syncpi, ttl_from_camera, ttl_check):
-#     anchor_point = np.where(abs(ttl_check) == np.min(abs(ttl_check)))[0][0]
-    
-    
-    
+    plt.show()   
 
 # W for my pc, Z for surf cloud
 #dlc_filePath = 'W:\\vs03.herseninstituut.knaw.nl\\VS03-CSF-1\\Conrad\\Innate_approach\\Data_analysis\\24.35.01\\DLC'
@@ -169,19 +169,20 @@ dlc_savePath = 'W:\\Conrad\\Innate_approach\\Data_analysis\\24.35.01\\DLC'
 fp_filePath = 'W:\\Conrad\\Innate_approach\\Data_collection\\24.35.01\\'
 fp_savePath = 'W:\\Conrad\\Innate_approach\\Data_analysis\\24.35.01\\'
 
-ntFilePth = 'W:\\Conrad\\Innate_approach\\Data_collection\\Neurotar\\'
-
 metadata_filepath = 'W:\\Conrad\\Innate_approach\\Data_analysis\\db_FP.mat'
 metadata = scipy.io.loadmat(metadata_filepath, struct_as_record=False, squeeze_me=True)
 db = metadata['db']
-# test = db[38]
 # filter for freelymovingLaser & temporarily just the days that i analyzed for now
-
 
 ntFilePth = 'W:\\Conrad\\Innate_approach\\Data_collection\\Neurotar\\'
 
 
-r_log = pd.read_csv(f"{fp_filePath}\\recordinglog.csv", sep=None, engine="python", encoding='cp1252')
+r_log = pd.read_csv(f"{fp_filePath}\\recordinglog.csv", sep=None, engine="python", encoding='utf-8-sig')
+
+# or use this:
+# r_log = pd.read_csv(f"{fp_filePath}\\recordinglog.csv", sep=None, engine="python", encoding='cp1252') 
+# r_log.columns = r_log.columns.str.replace('\ufeff', '').str.strip()
+
 # filter for freelymovingLaser & temporarily just the days that i analyzed for now
 if debug == False:
     r_log = r_log[r_log['Exp']=='fm laser'].reset_index()
@@ -218,7 +219,11 @@ params = {
 
 # first we need to correct fish-eye distrotion in dlc data and convert to real world coordinates
 for l in range(len(r_log)):
-    
+
+    # if l == 47:
+    #     continue
+ 
+    # l = 13
  
     record = [entry for entry in db if str(r_log['ID'][l]) in str(entry.subject)
                and str(r_log['Date'][l]).replace('_','-')[:-1] in str(entry.date)][0]
@@ -236,6 +241,8 @@ for l in range(len(r_log)):
     print(f"________________________________________________\nCurrent run: {date}{animal_id}\n------------------------------------------------")
     
     dlcAnimal = f"{dlc_filePath}\\{str(r_log['ID'][l])}_{str(r_log['Date'][l]).replace('_', '')}*fmLaserMouseFP*.csv"
+    if "filtered" in dlcAnimal:
+        print('Usiing filtered data, gross, dont do that, youre alreday filetering')
     dlcPrey = f"{dlc_filePath}\\{str(r_log['ID'][l])}_{str(r_log['Date'][l]).replace('_', '')}*prey*.csv"
     dlcIR = f"{dlc_filePath}\\{str(r_log['ID'][l])}_{str(r_log['Date'][l]).replace('_', '')}*IR*.csv"
     
@@ -279,19 +286,26 @@ for l in range(len(r_log)):
     
     ttl = ttl.drop(expanded_fIdx, axis = 0).reset_index(drop = True)    
         
-    ttl = ttl['Time'][::3]
-            
+    ttl = ttl['Time'][::3]           
     
 
     cam_ttl_file = f"{fp_filePath}{animal_id}\\{animal_id}_{date}_001\\{animal_id}_{date}_001_pioverhead_triggers.csv"
-    start_frame = pd.read_csv(cam_ttl_file).index[1]
+    cam_ttl_file_df = pd.read_csv(cam_ttl_file)
+    if 'ttl source' in cam_ttl_file_df.columns:
+        if (cam_ttl_file_df['ttl source'] == 'neurotar').any():
+            start_frame = cam_ttl_file_df.loc[
+                cam_ttl_file_df['ttl source'] == 'neurotar',
+                'frame'
+            ].iloc[0]
+        else:
+            start_frame = cam_ttl_file_df['frame'][1]
+    else:
+        start_frame = pd.read_csv(cam_ttl_file).index[1]
     
     df_pathList = [dlcAnimal, dlcPrey, dlcIR]
-    df_list = [0, 0, 0]
+    df_list = [0, 0, 0]  
     
-
     
-    # clean data for merging doesnt really work
     for i in range(len(df_list)):
         
         df_path = glob.glob(df_pathList[i])
@@ -299,34 +313,163 @@ for l in range(len(r_log)):
         df = df.iloc[:,1:]     # removes pointless 1st column
         df_list[i] = df 
         
-    # make indices
-    # y = pd.to_numeric(df_list[1][1][3:], errors='coerce')  # safely convert to float
-    # plt.figure()
-    # plt.plot(y.index, y.values)
-    # plt.show()    
+        # cropping out parts where animal isn't in frame
+        if i == 0:
+            dlc_df = pd.read_csv(
+                df_path[0],
+                header=[0,1,2],  
+                index_col=0,
+                low_memory=False)
+            
+            animal_out_of_view_index = list(map(int, r_log['animal hidden frames'][l].split(',')))
+            
+            N = len(dlc_df)
+            final_segments = []
+            
+            cuts = [0] + animal_out_of_view_index + [N]
+            
+            for i in range(0, len(cuts), 2):
+                start = cuts[i]
+                end   = cuts[i+1]
+            
+                if start < end:
+                    seg = dlc_df.iloc[start:end]
+                    final_segments.append(seg)
+            
+            # fish-eye correct raw, cropped dlc coordinates for keypoint-moseq
+            # Initialize a new DataFrame to hold transformed values
+            transformed_segments = []
+
+            for segment in final_segments:
+
+                cor_dlc = pd.DataFrame(index=segment.index)  # preserves frame numbers
+            
+                bodyparts = segment.columns.get_level_values(1).unique()
+                
+                # Get the scorer name once
+                scorer_name = segment.columns.get_level_values(0)[0]
+            
+                for bodypart in bodyparts:
+            
+                    bp_cols = segment.loc[:, (slice(None), bodypart, ['x', 'y', 'likelihood'])]
+                    
+                    # Separate x and y as arrays
+                    overhead_x = pd.to_numeric(bp_cols.xs('x', level=2, axis=1).iloc[:,0], errors='coerce').values
+                    overhead_y = pd.to_numeric(bp_cols.xs('y', level=2, axis=1).iloc[:,0], errors='coerce').values
+                    
+                    likelihood = bp_cols.xs('likelihood', level=2, axis=1).iloc[:,0].values
+            
+                    arena_x, arena_y = nt_change_overhead_to_arena_coordinates(
+                        overhead_x, overhead_y, params, centered_desired = False
+                    )
+                    
+                    # Add columns in x, y, likelihood order
+                    cor_dlc[(scorer_name, bodypart, 'x')] = arena_x
+                    cor_dlc[(scorer_name, bodypart, 'y')] = arena_y
+                    cor_dlc[(scorer_name, bodypart, 'likelihood')] = likelihood
+                    
+                    
+                cor_dlc.columns = pd.MultiIndex.from_tuples(
+                cor_dlc.columns, 
+                names=['scorer', 'bodyparts', 'coords'])
+            
+                # Sort columns to ensure proper order (scorer, bodypart, then x/y/likelihood)
+                coord_order = ['x', 'y', 'likelihood']
+                cor_dlc = cor_dlc.reindex(
+                    columns=pd.MultiIndex.from_product(
+                        [
+                            cor_dlc.columns.get_level_values(0).unique(),
+                            cor_dlc.columns.get_level_values(1).unique(), 
+                            coord_order
+                        ],
+                        names=['scorer', 'bodyparts', 'coords']
+                    )
+                )
+                
+                transformed_segments.append(cor_dlc)
+        
+                suffix_list = ['_01', '_02', '_03']
+                
+            for i, cor_dlc in enumerate(transformed_segments):
+                file_name = f'\\{animal_id}_{date}'
+                if len(transformed_segments) > 1:
+                    file_name = file_name + suffix_list[i]
+                kpms_file = dlc_savePath + file_name + '.csv'
+                
+                cor_dlc.to_csv(kpms_file)
+
+   # Check the saved file
+# test_df = pd.read_csv(kpms_file, header=[0,1,2], index_col=0)
+# print("Column structure check:")
+# print(test_df.columns[:9])  # First 3 bodyparts
+# print("\nCoords level values:")
+# print(test_df.columns.get_level_values(2).unique())
+# print("\nFirst bodypart columns:")
+# first_bp = test_df.columns.get_level_values(1).unique()[0]
+# print(test_df.loc[:, (slice(None), first_bp, slice(None))].columns)                
+                    
     
-    preyTrial_times = (r_log['prey trial times'][l]).split(',') 
-    preyTrial_idx = [timestamp_to_frame(ts) for ts in preyTrial_times]
     preyTrial_idx_filled = []
+    IRTrial_idx_filled = []
+    
+    
+        
+    
+    if np.isnan(r_log['prey trial times'][l]): # in the earlier cases for when r_log got corrupted
+        reference_file = f"{dlc_savePath}\\{r_log['Date'][l]}{r_log['ID'][l]} DLC.pkl" 
+        with open(reference_file, 'rb') as f:
+            processed_data = pickle.load(f)
+        
+        unclip = int(r_log['first prey'][l]) - setUp*sr
+
+
+        prey_snout_distance = processed_data['data'][3]
+        IR_snout_distance = processed_data['data'][4]
+    
+        # Detect where prey trials start and end
+        valid = ~np.isnan(prey_snout_distance) # boolean mask
+        prey_trial_starts = np.where(np.diff(valid.astype(int)) == 1)[0] + 1
+        prey_trial_ends = np.where(np.diff(valid.astype(int)) == -1)[0] + 1 - index_correction_factor
+        
+        if l == 14:
+            prey_trial_starts = prey_trial_starts[1:] # error where trial occured but not ttl registered by rwd. should save this trial somehow? 
+            prey_trial_ends = prey_trial_ends[1:] # error where trial occured but not ttl registered by rwd. should save this trial somehow? 
+                     
+        preyTrial_idx = np.sort(np.concatenate((prey_trial_starts, prey_trial_ends))) + unclip
+           
+        # Detect where IR trials start and end
+        valid = ~np.isnan(IR_snout_distance) # boolean mask
+        IR_trial_starts = np.where(np.diff(valid.astype(int)) == 1)[0] + 1
+        IR_trial_ends   = np.where(np.diff(valid.astype(int)) == -1)[0] + 1 - index_correction_factor
+        IRTrial_idx = np.sort(np.concatenate((IR_trial_starts, IR_trial_ends))) + unclip
+        
+        
+    
+    else:    
+        preyTrial_times = (r_log['prey trial times'][l]).split(',') 
+        preyTrial_idx = [timestamp_to_frame(ts) for ts in preyTrial_times]
+
+        IRTrial_times = (r_log['IR trial times'][l]).split(',') 
+        IRTrial_idx = [timestamp_to_frame(ts) for ts in IRTrial_times]
+        
+     
     for i in range(0, len(preyTrial_idx), 2):
         start, end = preyTrial_idx[i], preyTrial_idx[i+1]
-        preyTrial_idx_filled.extend(range(start, end + index_correction_factor))
+        preyTrial_idx_filled.extend(range(start, end + index_correction_factor))    
     
-
-        
+    for i in range(0, len(IRTrial_idx), 2):
+        start, end = IRTrial_idx[i], IRTrial_idx[i+1]
+        IRTrial_idx_filled.extend(range(start, end + index_correction_factor))
+    
+            
+    
+    # check it
     if len(preyTrial_idx_filled) != len(df_list[1])-3:
         # raise ValueError(f"Index length {len(preyTrial_idx_filled)} does not match prey length {len(df_list[1])}")
         print(f"Index length {len(preyTrial_idx_filled)} does not match prey length {len(df_list[1])-3}")
         print('Either DLC dropped frames (rerun) or you need to check video times in recording log')
         continue
     
-    IRTrial_times = (r_log['IR trial times'][l]).split(',') 
-    IRTrial_idx = [timestamp_to_frame(ts) for ts in IRTrial_times]
-    IRTrial_idx_filled = []
-    for i in range(0, len(IRTrial_idx), 2):
-        start, end = IRTrial_idx[i], IRTrial_idx[i+1]
-        IRTrial_idx_filled.extend(range(start, end + index_correction_factor))
-        
 
     if len(IRTrial_idx_filled) != len(df_list[2])-3:
         # raise ValueError(f"Index length {len(IRTrial_idx_filled)} does not match IR length {len(df_list[2])}")
@@ -351,17 +494,21 @@ for l in range(len(r_log)):
         raw_dlc.columns = pd.MultiIndex.from_arrays([raw_dlc.iloc[1], raw_dlc.iloc[2]])
         raw_dlc = raw_dlc[3:].reset_index(drop = True) # clips nonnumeric info 
 
-        # data clipping:
+        # general data clipping:
         if i == 0: 
-            raw_dlc = raw_dlc[start_frame:].reset_index(drop = True) # clips to nt start pulse
-            trim_start = preyTrial_idx_filled[0] - start_frame - setUp*30
+            raw_dlc = raw_dlc[start_frame:].reset_index(drop = True) # clips to syncing start pulse
+            if l == 47:
+                trim_start = preyTrial_idx_filled[0] - start_frame - 20*sr
+            else:
+                trim_start = preyTrial_idx_filled[0] - start_frame - setUp*sr
             # trim_start = 0
             trim_end = len(raw_dlc)-5*sr
             raw_dlc = raw_dlc[trim_start:trim_end].reset_index(drop = True)
-        
-        
+        if l == 47:
+            trim_factor = preyTrial_idx_filled[0] -20*sr
+        else:
+            trim_factor = preyTrial_idx_filled[0] - setUp*sr
         if i == 1:
-            trim_factor = preyTrial_idx_filled[0] - 120*sr
             raw_dlc.index = [x - trim_factor for x in preyTrial_idx_filled]
         elif i == 2:
             raw_dlc.index = [x - trim_factor for x in IRTrial_idx_filled]
@@ -373,8 +520,10 @@ for l in range(len(r_log)):
         # passes data through distortion correction
         #cor_dlc = pd.DataFrame(np.zeros(raw_dlc.shape))
         
+                
+        # for trial info, uncropped
         # Initialize a new DataFrame to hold transformed values
-        cor_dlc = pd.DataFrame(index=raw_dlc.index)
+        cor_dlc = pd.DataFrame(index=raw_dlc.index) 
     
         for bodypart in raw_dlc.columns.get_level_values(1).unique():
             if bodypart in ['pawFL', 'pawBL', 'pawFR', 'pawBR']: # these body parts arent often visible overhead, not good data
@@ -384,17 +533,16 @@ for l in range(len(r_log)):
                 # Get overhead coordinates
                 overhead_x = pd.to_numeric(raw_dlc[bodypart]['x'], errors='coerce').values
                 overhead_y = pd.to_numeric(raw_dlc[bodypart]['y'], errors='coerce').values
-        
+                        
                 # Transform coordinates
-                arena_x, arena_y = nt_change_overhead_to_arena_coordinates(overhead_x, overhead_y, params)
+                arena_x, arena_y = nt_change_overhead_to_arena_coordinates(overhead_x, overhead_y, params, centered_desired = True)
                
                 
                 # probably should plot body part data   
 
                 
                 # filter out low likelihood
-                
-                
+ 
                 ###
                 # i need to add something that detects long periods of low likelihood and flags it, eg for periods where i take animal out to fix cables
                 ###
@@ -435,16 +583,10 @@ for l in range(len(r_log)):
                 arena_x[mask] = np.nan
                 arena_y[mask] = np.nan
                 
-                # plt.figure()
-                # plt.plot(arena_y)
-                # plt.title('y before interpolation')
-                
-                # if snout, some restriction on space relative to head ring/ ears?
-                
                 # interpolate
                 
                 #####
-                # should change interpolation code for laser trials
+                # should change interpolation code for laser trials?
                 #####
                 
                 ts= np.arange(len(arena_x))
@@ -637,7 +779,7 @@ for l in range(len(r_log)):
 
 
     save_file = f"{dlc_savePath}\\{r_log['Date'][l]}{r_log['ID'][l]} DLC.pkl"
-    pd.to_pickle(dlcDat, save_file)
+    # pd.to_pickle(dlcDat, save_file) temmppp
     
     
 

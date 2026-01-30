@@ -15,6 +15,7 @@ def nt_ITI_movement(nt_file, ttl_file, event_timestamps, sr,
     import pandas as pd
     import matplotlib.pyplot as plt
     from scipy.signal import resample
+    from scipy.signal import resample_poly
     import scipy.io
     import datetime
     from boxoff import boxoff
@@ -155,14 +156,31 @@ def nt_ITI_movement(nt_file, ttl_file, event_timestamps, sr,
     # clip_end = (max(ttl) + 30 * sr)/sr*sr_nt
 
     speed = speed[int(clip_start):]
-    speed = resample(speed, int(len(speed) * sr / sr_nt))
+    final_length = int(len(speed) * sr / sr_nt) # makes sure speed vector size matches fp signal
+    # speed_old = resample(speed, int(len(speed) * sr / sr_nt))
+    # plt.figure()
+    # plt.plot(speed_old)
+    # plt.vlines(ttl, ymin=min(speed_old), ymax=max(speed_old), color='k')
+    # plt.title('Speed after resampling')
+    
+    speed = resample_poly(speed, sr, sr_nt)
+    speed = speed[0:final_length]
+    # plt.figure()
+    # plt.plot(speed)
+    # plt.vlines(ttl, ymin=min(speed), ymax=max(speed), color='k')
+    # plt.title('Speed after poly resampling')
+
     angular_velocity = angular_velocity[int(clip_start):]
-    angular_velocity = resample(angular_velocity, int(len(angular_velocity) * sr / sr_nt))
+    angular_velocity = resample_poly(angular_velocity, sr, sr_nt)
+    angular_velocity = angular_velocity[0:final_length]
+
+    # angular_velocity = resample(angular_velocity, int(len(angular_velocity) * sr / sr_nt))
 
     fwdSpeed = neurotar_data.Forward_speed
     fwdSpeed = fwdSpeed[~np.isnan(fwdSpeed)]
     fwdSpeed = fwdSpeed[int(clip_start):]
-    fwdSpeed = resample(fwdSpeed, int(len(fwdSpeed) * sr / sr_nt))
+    fwdSpeed = resample_poly(fwdSpeed, sr, sr_nt)
+    fwdSpeed = fwdSpeed[0:final_length]
     
     
     speed_c = speed

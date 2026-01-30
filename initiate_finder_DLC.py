@@ -125,7 +125,9 @@ def initiate_finder_DLC(ttlFile, eventTS_RWD, r_log, fIdx, l, setUp,
     if l == 14:
         prey_trial_starts = prey_trial_starts[1:] # error where trial occured but not ttl registered by rwd. should save this trial somehow? 
         
-    prey_trial_ends   = np.where(np.diff(valid.astype(int)) == -1)[0] + 1
+    prey_trial_ends = np.where(np.diff(valid.astype(int)) == -1)[0] + 1
+    if l == 14:
+        prey_trial_ends = prey_trial_ends[1:] # error where trial occured but not ttl registered by rwd. should save this trial somehow? 
     
     # Detect where IR trials start and end
     valid = ~np.isnan(IR_snout_distance) # boolean mask

@@ -17,19 +17,19 @@ fm_exp = True # set to false if analyzing nt experiments
 regenerate_approach_trial_times = False # used for shuffling trial times for NR trials
 automate_initiate_finder = True # set to false to use manually curated initate times (only for trials, not for ITI)
 
-inspect_traces = True
+inspect_traces = False # plots individual traces on same graph
 
 plotsignal = False
-plotknee = True
+plotknee = False # plot 'knee' of movement, used to visually verify calculated initiation point
 
 plot_Zscore = True # set to false if you want to see % dFoF
 
-plot_apr_trace = False
-plot_ITI_trace = False
+plot_apr_trace = False # plot traces for approach trials
+plot_ITI_trace = False # plot traces for movement during Inter-Trial Intervals
 plotheatmap = True
 plotidvtrials = False
 plot_angular_velocity = False
-plot_cros_cor = False
+plot_cros_cor = False #cross correlations between signal and fwd movement
 
 initiate_exclusion = 5 # in seconds
 
@@ -48,19 +48,55 @@ import glob
 import pickle
 import random
 from boxoff import boxoff
+from scipy.stats import (ttest_ind, mannwhitneyu, shapiro, 
+                         levene, ttest_rel, wilcoxon)
+
 
 # Low-pass filter function
 def lpFilter(data, sr, lowpass_cutoff, filt_order, db_atten):
     
-    # Design a low-pass filter using Butterworth filter design
-    nyquist = 0.5 * sr
-    normal_cutoff = lowpass_cutoff / nyquist
+    # # Design a low-pass filter using Butterworth filter design (old filtering method)
+    # nyquist = 0.5 * sr
+    # normal_cutoff = lowpass_cutoff / nyquist
     
-    # Design a Butterworth filter
-    b, a = signal.butter(filt_order, normal_cutoff, btype='low', analog=False)
+    # # Design a Butterworth filter
+    # b, a = signal.butter(filt_order, normal_cutoff, btype='low', analog=False)
     
-    # Apply the filter to the data
-    lp_data = signal.filtfilt(b, a, data)
+    # # Apply the filter to the data
+    # # lp_data = signal.filtfilt(b, a, data) #0 phase, noncausal
+    # lp_data = signal.lfilter(b, a, data) # IIR (non-linear phase delay)
+    
+    
+    sos = signal.butter(
+        filt_order,
+        lowpass_cutoff,
+        fs=sr,
+        btype='low',
+        output='sos'
+    )
+    
+    lp_data = signal.sosfiltfilt(sos, data)
+    
+    
+    # # calculate group delay (if using lfilt)
+
+    # b, a = signal.sos2tf(sos) #sosfilt
+    # w, gd = signal.group_delay((b, a), fs=sr) #sosfilt
+
+    # # w, gd = signal.group_delay((b, a), fs=sr) #lfilter
+    # plt.plot(w, gd)
+    # plt.xlabel("Frequency (Hz)")
+    # plt.ylabel("Group delay (samples)")
+    # plt.title("Group Delay of Butterworth Low-Pass Filter")
+    # plt.grid(True)
+    # plt.show()
+    
+    # passband = w < lowpass_cutoff
+    # avg_delay = np.mean(gd[passband])
+    
+    # print(f"Average passband group delay: {avg_delay:.2f} samples")
+    # print(f"≈ {avg_delay / sr:.4f} seconds")
+
     return lp_data
 
 # IRLS dF/F function
@@ -143,7 +179,8 @@ nt_savePath = 'W:\\Conrad\\Innate_approach\\Data_analysis\\24.35.01\\'
 fm_savePath = 'W:\\Conrad\\Innate_approach\\Data_analysis\\24.35.01\\freelymoving\\'
 ntFilePth = 'W:\\Conrad\\Innate_approach\\Data_collection\\Neurotar\\'
 fm_approach_times_path = 'W:\\Conrad\\Innate_approach\\Data_analysis\\24.35.01\\DLC\\approach_times_since_trial_start.pkl'
-nt_approach_times_path = f"{nt_savePath}\\approach_times_since_trial_start.pkl"
+nt_approach_times_path = f"{nt_savePath}\\approach_times_since_trial_start.pkl"    
+kpms_general_path = 'E:/Conrad/DLC projects/DLC 06_01_2025/fm_subset_cropped/2026_01_14-14_00_06/results/'
 
 
 if regenerate_approach_trial_times == False:
@@ -159,7 +196,7 @@ if regenerate_approach_trial_times == False:
 else:
      shuffled_nt_apr_times = []
 
-r_log = pd.read_csv(f"{filePath}\\recordinglog.csv", sep=None, engine="python", encoding='cp1252')
+r_log = pd.read_csv(f"{filePath}\\recordinglog.csv", sep=None, engine="python", encoding='utf-8-sig')
 
 
 if fm_exp:
@@ -186,6 +223,8 @@ animalIDs = r_log['ID'].unique()
 dates = r_log['Date'].unique()
 numChannels = 2
 
+excluded_animals = ['105647']
+
 
 # Preprocessing initialization
 lowpass_cutoff = 3  # Low-pass cut-off in Hz
@@ -209,23 +248,18 @@ driftTable = np.zeros((len(r_log), 4))
 
 fm_drift = []
 fm_drift_ratio = []
+all_bouts = []
+
 # %%
 
 
 for l in range(len(r_log)):
-
-    
-    # l = 45
     
     idn = str(r_log['ID'][l])
     d = str(r_log['Date'][l]) 
     exp = r_log['Exp'][l]
     
-        
-    if l == 14 and exp != 'nt':
-        continue
-    
-    if idn == '105647': # exclude from analysis
+    if idn in excluded_animals: # exclude from analysis
         continue
         
     # Load data
@@ -279,6 +313,7 @@ for l in range(len(r_log)):
         eventTSBehind = eventTS[behindLaserIndex]
         eventTS = eventTS.delete(behindLaserIndex)
         
+        
     else:
         eventTSBehind = np.nan
                
@@ -293,7 +328,7 @@ for l in range(len(r_log)):
     clipEnd = len(rawData.iloc[:, 2]) - 5*sr # trims last 5 seconds
     
         
-    
+    last_event_noclip = eventTS[-1]
     
     eventTS = eventTS - clipStart
         
@@ -301,10 +336,10 @@ for l in range(len(r_log)):
         site = r_log[str(ch)][l]
         
         # insert debug condition(s) below
-        if debug and idn != '116637':
+        if debug and idn != '111610' and d != '2025_05_12':
             continue
         
-        # #changes site based on histolgy
+        # # changes site based on histology, for later
         # if id in [x, y ,z]:
         #     if site == 'SC-L':
         #         site = 'sSC-L'
@@ -319,6 +354,16 @@ for l in range(len(r_log)):
         chIsos = rawData.iloc[int(clipStart):int(clipEnd), 2 * ch]
         chGreen = rawData.iloc[int(clipStart):int(clipEnd), 2 * ch + 1]
         
+        proper_trim = len(rawData.iloc[int(clipStart):int(last_event_noclip+25*sr), 2 * ch])
+        
+        # sample_signal = sample_signal = np.concatenate([np.full(300, 0), np.full(300, 1), np.full(300, 0)])
+        # filtered_sample = lpFilter(sample_signal, sr, lowpass_cutoff, filt_order, db_atten)
+        
+        # plt.figure()
+        # plt.plot(sample_signal)
+        # plt.plot(filtered_sample)
+        # plt.title('Raw and filtered sample data')
+
         # Apply low-pass filter
         lp_normDatG = lpFilter(chGreen, sr, lowpass_cutoff, filt_order, db_atten)
         lp_normDatI = lpFilter(chIsos, sr, lowpass_cutoff, filt_order, db_atten)
@@ -339,6 +384,8 @@ for l in range(len(r_log)):
         traces = np.full((len(eventTS), before + after), np.nan)
         tracesGraw = np.full((len(eventTS), before + after), np.nan)
         tracesIraw = np.full((len(eventTS), before + after), np.nan)
+        real_tracesGraw = np.full((len(eventTS), before + after), np.nan)
+        real_tracesIraw = np.full((len(eventTS), before + after), np.nan)
              
         # get nt data
         if ch == 1:
@@ -516,8 +563,12 @@ for l in range(len(r_log)):
         # Extract traces for all trials, aligned to prey laser onset
         for m, idx in enumerate(eventTS):
             traces[m] = dFoF[idx - before:idx + after]
+            
+            # below traces are only needed for in depth inspection of signal
             tracesGraw[m] = lp_normDatG[idx - before:idx + after]
             tracesIraw[m] = lp_normDatI[idx - before:idx + after]
+            real_tracesGraw[m] = chGreen[idx - before:idx + after]
+            real_tracesIraw[m] = chIsos[idx - before:idx + after]
             
         if inspect_traces and np.any(prey_inspect_mask):
             for trial_number, mask in enumerate(prey_inspect_mask):
@@ -526,14 +577,30 @@ for l in range(len(r_log)):
                     plt.plot(traces[trial_number], color = [0.773, 0.467, 0.788])
                     plt.plot(tracesGraw[trial_number] - np.mean(tracesGraw[trial_number]), color = [0.459, 0.8, 0.361], alpha=0.7)
                     plt.plot(tracesIraw[trial_number] - np.mean(tracesIraw[trial_number]), color = [0.373, 0.671, 0.922], alpha=0.7)
-                    plt.title(f'Traces for trial {trial_number} (index 0)')
+                    plt.title(f'Traces for prey trial {trial_number} (index 0)')
                     boxoff()
         
         # extract IR traces, at IR onset
         IR_traces = []
+        IR_tracesGraw = []
+        IR_tracesIraw = []
         if len(IR_idx) > 0:
             for index in IR_idx:
                 IR_traces.append(dFoF[index - before: index + after])
+                IR_tracesGraw.append(lp_normDatG[index - before:index + after])
+                IR_tracesIraw.append(lp_normDatI[index - before:index + after])
+
+                
+                
+            if inspect_traces and np.any(IR_inspect_mask):
+                 for trial_number, mask in enumerate(IR_inspect_mask):
+                     if mask:
+                         plt.figure()
+                         plt.plot(IR_traces[trial_number], color = [0.773, 0.467, 0.788])
+                         plt.plot(IR_tracesGraw[trial_number] - np.mean(IR_tracesGraw[trial_number]), color = [0.459, 0.8, 0.361], alpha=0.7)
+                         plt.plot(IR_tracesIraw[trial_number] - np.mean(IR_tracesIraw[trial_number]), color = [0.373, 0.671, 0.922], alpha=0.7)
+                         plt.title(f'Traces for IR trial {trial_number}, Ch {ch}')
+                         boxoff()
         
         
         # # Align raw traces to movement if necessary. i do this to show isosbestic doesnt change with movement 
@@ -659,27 +726,28 @@ for l in range(len(r_log)):
         # Baseline correction (z-scoring)
         #################################
         
-        # not taking trial type into consideration?:
-        traceDataSD = np.std(traces[:, :pre * sr], axis=1) # axis 1 is along row
-        ZdFoF = (traces - np.mean(traces[:, :pre * sr], axis=1).reshape(-1, 1)) / traceDataSD.reshape(-1, 1)
+        # traceDataSD = np.std(traces[:, :pre * sr], axis=1) # axis 1 is along row
+        traceDataSD = np.std(traces[:, :pre * sr]) 
+        
+        ZdFoF = (traces - np.mean(traces[:, :pre * sr], axis=1).reshape(-1, 1)) / traceDataSD
         
         # Collate data 
         if len(IR_traces) > 0:
             IR_traces = np.vstack(IR_traces)
-            IR_traceDataSD = np.std(IR_traces[:, :pre * sr], axis=1) # axis 1 is along row
-            IR_ZdFoF = (IR_traces - np.mean(IR_traces[:, :pre * sr], axis=1).reshape(-1, 1)) / IR_traceDataSD.reshape(-1, 1)
+            IR_traceDataSD = np.std(IR_traces[:, :pre * sr]) 
+            IR_ZdFoF = (IR_traces - np.mean(IR_traces[:, :pre * sr], axis=1).reshape(-1, 1)) / IR_traceDataSD
         
-        traceDataSDG = np.std(tracesGraw[:, :pre * sr], axis=1)
-        Gdata = (tracesGraw - np.mean(tracesGraw[:, :pre * sr], axis=1).reshape(-1, 1)) / traceDataSDG.reshape(-1, 1)
+        traceDataSDG = np.std(tracesGraw[:, :pre * sr])
+        Gdata = (tracesGraw - np.mean(tracesGraw[:, :pre * sr], axis=1).reshape(-1, 1)) / traceDataSDG
         
-        traceDataSDI = np.std(tracesIraw[:, :pre * sr], axis=1)
-        Idata = (tracesIraw - np.mean(tracesIraw[:, :pre * sr], axis=1).reshape(-1, 1)) / traceDataSDI.reshape(-1, 1)
+        traceDataSDI = np.std(tracesIraw[:, :pre * sr])
+        Idata = (tracesIraw - np.mean(tracesIraw[:, :pre * sr], axis=1).reshape(-1, 1)) / traceDataSDI
         
         # APPROACH INITIATION and PREYLASER ALIGNED
         
         if approachTrials is not np.nan and len(approachTrials) > 0:
-            ZdFoFApproach = (appTracesInit - np.mean(traces[app_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD[app_idx].reshape(-1, 1)
-            ZdFoFApproach_trialOnset = (traces[app_idx] - np.mean(traces[app_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD[app_idx].reshape(-1, 1)
+            ZdFoFApproach = (appTracesInit - np.mean(traces[app_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD
+            ZdFoFApproach_trialOnset = (traces[app_idx] - np.mean(traces[app_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD
             
             if plot_apr_trace:
                 if plot_Zscore:
@@ -712,8 +780,8 @@ for l in range(len(r_log)):
         
         # IR trials
         if len(IR_approachTrials) > 0:
-            IR_ZdFoFApproach = (IR_appTracesInit - np.mean(IR_traces[IR_app_idx,:pre*sr],axis=1).reshape(-1, 1)) / IR_traceDataSD[IR_app_idx].reshape(-1, 1)
-            IR_ZdFoFApproach_trialOnset = (IR_traces[IR_app_idx] - np.mean(IR_traces[IR_app_idx,:pre*sr],axis=1).reshape(-1, 1)) / IR_traceDataSD[IR_app_idx].reshape(-1, 1)
+            IR_ZdFoFApproach = (IR_appTracesInit - np.mean(IR_traces[IR_app_idx,:pre*sr],axis=1).reshape(-1, 1)) / IR_traceDataSD
+            IR_ZdFoFApproach_trialOnset = (IR_traces[IR_app_idx] - np.mean(IR_traces[IR_app_idx,:pre*sr],axis=1).reshape(-1, 1)) / IR_traceDataSD
             
             if plot_apr_trace:
                 if plot_Zscore:
@@ -746,8 +814,8 @@ for l in range(len(r_log)):
             
         # AVOID INITIATION and PREYLASER ALIGNED
         if avoidTrials is not np.nan and len(avoidTrials) > 0:
-            ZdFoFAvoid = (avdTracesInit - np.mean(traces[avd_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD[avd_idx].reshape(-1, 1)
-            ZdFoFAvoid_trialOnset = (traces[avd_idx] - np.mean(traces[avd_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD[avd_idx].reshape(-1, 1)
+            ZdFoFAvoid = (avdTracesInit - np.mean(traces[avd_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD
+            ZdFoFAvoid_trialOnset = (traces[avd_idx] - np.mean(traces[avd_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD
 
         else:
             ZdFoFAvoid = np.nan
@@ -756,9 +824,9 @@ for l in range(len(r_log)):
         # and for NR (only PREYLASER ALIGNED)
         ZdFoFNR = ZdFoFNR_yoked = np.nan
         if NRtrials is not np.nan and len(NRtrials) > 0:
-            ZdFoFNR = (NRtraces - np.mean(traces[NR_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD[NR_idx].reshape(-1, 1)
+            ZdFoFNR = (NRtraces - np.mean(traces[NR_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD
             
-            ZdFoFNR_yoked = (NRtraces_yoked - np.mean(traces[NR_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD[NR_idx].reshape(-1, 1)
+            ZdFoFNR_yoked = (NRtraces_yoked - np.mean(traces[NR_idx,:pre*sr],axis=1).reshape(-1, 1)) / traceDataSD
 
             
             
@@ -767,16 +835,16 @@ for l in range(len(r_log)):
         if tracesITI is not np.nan and len(tracesITI) > 0:
             tracesITI = np.vstack(tracesITI);
 
-            traceDataSDITI = np.std(tracesITI[:,:pre*sr],axis = 1)
-            ZdFoFITI = (tracesITI - np.mean(tracesITI[:,:pre*sr], axis=1).reshape(-1,1))/ traceDataSDITI.reshape(-1, 1)
+            traceDataSDITI = np.std(tracesITI[:,:pre*sr])
+            ZdFoFITI = (tracesITI - np.mean(tracesITI[:,:pre*sr], axis=1).reshape(-1,1))/ traceDataSDITI
 
             tracesITIGraw = np.vstack(tracesITIGraw)
-            traceDataSDG = np.std(tracesITIGraw[:,:pre*sr],axis=1)
-            ITIGdata = (tracesITIGraw - np.mean(tracesITIGraw[:,:pre*sr],axis=1).reshape(-1,1)) /traceDataSDG.reshape(-1, 1)
+            traceDataSDG = np.std(tracesITIGraw[:,:pre*sr])
+            ITIGdata = (tracesITIGraw - np.mean(tracesITIGraw[:,:pre*sr],axis=1).reshape(-1,1)) /traceDataSDG
 
             tracesITIIraw = np.vstack(tracesITIIraw)
-            traceDataSDI = np.std(tracesITIIraw[:,:pre*sr], axis=1)
-            ITIIdata = (tracesITIIraw - np.mean(tracesITIIraw[:,:pre*sr],axis=1).reshape(-1,1)) /traceDataSDI.reshape(-1, 1)
+            traceDataSDI = np.std(tracesITIIraw[:,:pre*sr])
+            ITIIdata = (tracesITIIraw - np.mean(tracesITIIraw[:,:pre*sr],axis=1).reshape(-1,1)) /traceDataSDI
             
             
             if plot_ITI_trace:
@@ -1014,6 +1082,233 @@ for l in range(len(r_log)):
                 boxoff()
         
 # %%
+    #    syllable data
+        mean_dFoF_by_syllable = np.nan
+        animal_out_of_view_index = list(map(int, r_log['animal hidden frames'][l].split(',')))
+        
+        left_turn = [5, 9, 10, 11, 13]
+        right_turn = [3, 4, 6, 8, 16]
+        if len(animal_out_of_view_index) < 3 and l != 13:
+            kpms_first_ttl = int(r_log['first prey'][l])
+    
+            kpms_path = kpms_general_path + idn + '_' + d.replace("_", "") + '.csv'
+            kpms_data = pd.read_csv(kpms_path, sep=None, engine="python", encoding='cp1252')
+            kpms_data = kpms_data[kpms_first_ttl-animal_out_of_view_index[1]-setUp:]
+            kpms_data = kpms_data[:proper_trim]
+            
+            dFoF_series = dFoF[:proper_trim]
+            dFoF_series = pd.Series(dFoF_series, index=kpms_data.index)
+            
+            # category column
+            cat_col = "syllable"
+            
+            categories = kpms_data[cat_col].values
+            frames = kpms_data.index.values  # keeps original frame index
+            
+            bouts = []
+            
+            current_cat = categories[0]
+            start_i = 0
+            
+            for i in range(1, len(categories)):
+                if categories[i] != current_cat:
+                    end_i = i
+                    length = end_i - start_i
+            
+                    bouts.append({
+                        "syllable": current_cat,
+                        "start_frame": frames[start_i],
+                        "end_frame": frames[end_i-1],
+                        "length_frames": length
+                    })
+            
+                    # reset
+                    current_cat = categories[i]
+                    start_i = i
+            
+            # add last bout
+            bouts.append({
+                "syllable": current_cat,
+                "start_frame": frames[start_i],
+                "end_frame": frames[-1],
+                "length_frames": len(categories) - start_i
+            })
+            
+            bout_df = pd.DataFrame(bouts)
+            
+            bout_df["animal"] = idn
+            bout_df["date"] = d
+            all_bouts.append(bout_df)
+
+            # print(bout_df.head())
+            # print("Total bouts:", len(bout_df))
+            
+            # summary = bout_df.groupby("syllable")["length_frames"].describe()
+            # print(summary)
+            
+            # by frame
+            valid_syllables = list(range(0,21)) # should automate this
+            mean_dFoF_by_syllable = dFoF_series.groupby(kpms_data['syllable']).mean()  
+            mean_dFoF_by_syllable = mean_dFoF_by_syllable[mean_dFoF_by_syllable.index.isin(valid_syllables)]
+            
+            # # --- Extract mean dFoF values for each group ---
+            left_mask = kpms_data["syllable"].isin(left_turn)
+            right_mask = kpms_data["syllable"].isin(right_turn)
+            
+            # Extract dFoF values from ALL frames in each group
+            left_turn_mean = dFoF_series[left_mask].mean()
+            left_turn_SD = dFoF_series[left_mask].std()
+
+            right_turn_mean = dFoF_series[right_mask].mean()
+            right_turn_SD = dFoF_series[right_mask].std()
+
+            plt.figure()
+
+            plt.bar(
+                ["Left Turn", "Right Turn"],
+                [left_turn_mean, right_turn_mean],
+                yerr=[left_turn_SD, right_turn_SD],
+                capsize=6
+            )
+            plt.axhline(y=0, linestyle='--',
+                linewidth=1,
+                color='black')
+            plt.ylabel("Mean dF/F")
+            plt.title(f' {idn} {d} {site} Mean dF/F by frame')
+            plt.tight_layout()
+            boxoff()
+            plt.show()
+
+            
+            
+            SD_dFoF_by_syllable = dFoF_series.groupby(kpms_data['syllable']).std()
+            SD_dFoF_by_syllable = SD_dFoF_by_syllable[SD_dFoF_by_syllable.index.isin(valid_syllables)]
+
+            
+            syllables = mean_dFoF_by_syllable.index
+
+            
+            plt.figure()
+            mean_dFoF_by_syllable.plot(kind='bar')
+            plt.errorbar(
+                syllables,
+                mean_dFoF_by_syllable.values,
+                yerr=SD_dFoF_by_syllable,
+                fmt='none',
+                capsize=4,
+                color = 'black'
+            )
+            plt.axhline(y = 2*np.std(dFoF_series), linestyle='--',
+                linewidth=1,
+                color='black')
+            plt.axhline(y = -2*np.std(dFoF_series), linestyle='--',
+                linewidth=1,
+                color='black')
+            plt.xlabel('Syllable')
+            plt.ylabel('Mean dF/F')
+            plt.title(f' {idn} {d} {site} Mean dF/F by syllable')
+            plt.tight_layout()
+            plt.show()
+            
+            # by bout
+            syllable = kpms_data['syllable']
+
+            bout_id = (syllable != syllable.shift()).cumsum()
+            
+            df = pd.DataFrame({
+                'syllable': syllable,
+                'dFoF': dFoF_series,
+                'bout_id': bout_id
+            })
+            
+            bout_lengths = df.groupby('bout_id').size()
+            valid_bouts = bout_lengths[bout_lengths >= 5].index
+            
+            
+            
+            bout_means = (
+                df
+                .groupby(['syllable', 'bout_id'])['dFoF']
+                .mean()
+                .reset_index()
+            )
+            
+            bout_means = bout_means[bout_means['bout_id'].isin(valid_bouts)]
+            
+            mean_dFoF_per_syllable_bout = (
+                bout_means
+                .groupby('syllable')['dFoF']
+                .mean()
+            )
+            mean_dFoF_per_syllable_bout = mean_dFoF_per_syllable_bout[mean_dFoF_per_syllable_bout.index.isin(valid_syllables)].reindex(syllables)
+
+
+            # grouped syllable bouts
+            left_bout_vals = mean_dFoF_per_syllable_bout[
+                mean_dFoF_per_syllable_bout.index.isin(left_turn)
+            ]
+            
+            right_bout_vals = mean_dFoF_per_syllable_bout[
+                mean_dFoF_per_syllable_bout.index.isin(right_turn)
+            ]
+            
+            # plt.figure()
+
+            # plt.bar(
+            #     ["Left Turn", "Right Turn"],
+            #     [left_bout_vals.mean(), right_bout_vals.mean()],
+            #     yerr=[left_bout_vals.sem(), right_bout_vals.sem()],
+            #     capsize=6
+            # )
+            
+            # plt.ylabel("Mean dF/F per bout")
+            # plt.title("Bout-Based dF/F Comparison: Left vs Right Turn")
+            # plt.tight_layout()
+            # plt.show()
+
+
+            # all bouts
+            SD_dFoF_per_syllable = (
+                bout_means
+                .groupby('syllable')['dFoF']
+                .std()
+            )          
+            SD_dFoF_per_syllable = SD_dFoF_per_syllable[SD_dFoF_per_syllable.index.isin(valid_syllables)].reindex(syllables)
+
+            
+            n_bouts = bout_means.groupby('syllable').size()
+            # syllables = mean_dFoF_per_syllable_bout.index
+
+            plt.figure()
+            plt.bar(
+                syllables,
+                mean_dFoF_per_syllable_bout.values
+            )
+            plt.errorbar(
+                syllables,
+                mean_dFoF_per_syllable_bout.values,
+                yerr=SD_dFoF_per_syllable,
+                fmt='none',
+                capsize=4,
+                color = 'black'
+            )
+            plt.axhline(y = 2*np.std(dFoF_series), linestyle='--',
+                linewidth=1,
+                color='black')
+            plt.axhline(y = -2*np.std(dFoF_series), linestyle='--',
+                linewidth=1,
+                color='black')
+            plt.xlabel('Syllable')
+            plt.ylabel('Mean dF/F (per bout)')
+            plt.title(f' {idn} {d} {site} Mean dF/F per syllable bout')
+            plt.tight_layout()
+            plt.show()
+
+           
+            print(f"dif between proper_trim and kpms_data is {proper_trim-len(kpms_data)} frames") # i think this could be improved by using camera's ttl (first frame when laser appears on last prey trial)
+            
+        else:
+            print('Multiple clippings in file, skipping for now. Write code for this later')
 
 # %%
         # Save data
@@ -1058,7 +1353,9 @@ for l in range(len(r_log)):
     
             'speedTrials': speedTrials if ch == 1 else np.nan,
             'speedITI': speedITI if ch == 1 else np.nan,
-            'speedTrialsMov': speedTrialsMov if ch == 1 else np.nan
+            'speedTrialsMov': speedTrialsMov if ch == 1 else np.nan,
+            
+            'mean_dFoF_by_syllable': mean_dFoF_by_syllable
             
             
                 
@@ -1071,6 +1368,23 @@ for l in range(len(r_log)):
             
         pd.to_pickle(sesdat, save_file)
 # %%
+master_bout_df = pd.concat(all_bouts, ignore_index=True)
+summary = master_bout_df.groupby("syllable")["length_frames"].describe()
+print(summary)
+median_lengths = master_bout_df.groupby("syllable")["length_frames"].median()
+print(median_lengths)
+
+plt.figure(figsize=(12,6))
+master_bout_df.boxplot(column="length_frames", by="syllable")
+plt.title("Bout Length Distribution Across All Sessions")
+plt.suptitle("")
+plt.ylabel("Frames")
+plt.show()
+session_summary = master_bout_df.groupby(
+    ["animal", "date", "syllable"]
+)["length_frames"].mean().reset_index()
+
+print(session_summary.head())
 
 # np.mean(fm_drift) # -10.662857142856318
 # np.mean(fm_drift_ratio) # -0.00041931890844608486
